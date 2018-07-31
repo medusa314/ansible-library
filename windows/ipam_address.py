@@ -43,17 +43,10 @@ options:
         default: null
         choices: []
         aliases: []
-    context:
+    customConfiguration:
         description:
-            - Custom Configuration - firewall context; provide with site
+            - Custom Configuration string
         required: false
-        default: null
-        choices: []
-        aliases: []
-    site:
-        description:
-            - Custom Configuration - device site; provide with context
-        required: true
         default: null
         choices: []
         aliases: []
@@ -106,77 +99,96 @@ options:
         default: "Static"
         choices: ["Static","Dynamic"]
         aliases: []
+    numberOfAddresses:
+        description:
+            - the number of addresses required
+        required: false
+        default: 1
+        aliases: []
+    customConfiguration:
+        description:
+            - IPAM custom field string.
+        required: false
+        default: null
+        aliases: []
     state:
         description:
             - Desired state
         required: false
         default: present
-        choices: ['present','absent','query','create','modify']
+        choices: ['present','absent','query']
         aliases: []
 '''
 EXAMPLES = '''
-ipam_getaddress: 
+ipam_address: 
   startRange: 204.154.41.128
   endRange: 204.154.41.159
+  numberOfAddresses: 2
   
-ipam_getaddress: 
-  context: DHS
-  site: DS
+ipam_address: 
+  customConfiguration: "VRF=vrf-1;Site=DC1"
   addressCategory: public
   
-ipam_getaddress: 
+ipam_address: 
   ip: 204.154.41.128
   state: query
   
 ipam_setaddress:
   ip: 64.68.39.224
   description: PUBLIC_TEST-HOST-1
-  state: create
 '''
 RETURN = '''
 changed:
     description:  Whether or not changed
     returned: True
-    type: string
+    type: bool
     sample: True
+failed:
+    description:  Whether or not failed
+    returned: True
+    type: bool
+    sample: False
 ip:
-    description:  Free IP address found
+    description:  IP address
     returned: True
     type: string
     sample: 10.1.1.2
-context:
-    description:  Firewall context the IP address is routed to
+description:
+    description:  IPAM IPAddress description
     returned: True
     type: string
-    sample: DHS
-site:
-    description:  Site designator
-    returned: True
-    type: string
-    sample: DS
+    sample: "TEST-HOST"
 startRange:
     description:  start of the range the IP address belongs to
     returned: True
     type: string
-    sample: 10.1.1.1
+    sample: "10.1.1.1"
 endRange:
     description:  end of the range the IP address belongs to
     returned: True
     type: string
-    sample: 10.1.1.254
-subnetName:
-    description:  the name of the subnet
+    sample: "10.1.1.254"
+range:
+    description:  the range the IP address belongs to and its attributes
     returned: True
     type: string
-    sample: services_dmz
-rangeName:
-    description:  the name of the range
+    sample: {"addresses": {"assigned": 70, "percentageUtilized": 50, "utilized": 35},"assignmentType": "Static","description": "DEVICE MGMT","managedByService": "IPAM"}
+subnet:
+    description:  the subnet the IP address belongs to and its attributes
     returned: True
     type: string
-    sample: DS-NS-INT
+    sample: { "addressSpace": "Default", "addresses": {"assigned": 251, "percentageUtilized": 13.8671875, "utilized": 71 }, 
+              "customConfiguration": {"City": "North City", "Site": "DC1", "VRF": "vrf-1"}, 
+              "description": "security_subnet",  "name": "security_system",  "networkID": "10.1.1.0/24",  "networkType": "NonVirtualized", 
+              "overlap": false,  "owner": "Security",  "totalAddresses": 256,  "vlan": [4] }
 category:
     description:  whether IP is public or private
     returned: True
     type: string
-    sample: private
+    sample: "private"
+msg:
+    description:  user message indicating return status
+    returned: True
+    type: string
+    sample: "query successful"
 '''
