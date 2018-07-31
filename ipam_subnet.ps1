@@ -215,6 +215,74 @@ Function Set-Attr($obj, $name, $value)
     }
 }
 
+# Sets results for query.  Assumes a valid Subnet object is passed as a parameter.
+Function Set-QueryResults($subnet)
+{
+	$s = @{}
+	$s.name = $subnet.Name
+	$s.networkID = $subnet.NetworkId
+	$s.overlap = $subnet.Overlapping
+	$s.totalAddresses = $subnet.TotalAddresses
+	if($subnet.Description)
+	{
+		$s.description = $subnet.Description
+	}
+	if($subnet.VlanID)
+	{
+		$s.vlan = $subnet.VlanID
+	}
+	if($subnet.CustomerAddressSpace)
+	{
+		$s.vlan = $subnet.CustomerAddressSpace
+	}
+	if($subnet.Owner)
+	{
+		$s.owner = $subnet.Owner
+	}
+	if($subnet.AssignedAddresses)
+	{
+		$addresses = @{}
+		$addresses.assigned = $subnet.AssignedAddresses
+		$addresses.percentageUtilized = $subnet.PercentageUtilized
+		$addresses.utilized = $subnet.UtilizedAddresses
+		$s.addresses = $addresses
+	}
+	if($subnet.VmmLogicalNetwork)
+	{
+		$s.vmmLogicalNetwork = $subnet.VmmLogicalNetwork
+	}
+	if($subnet.AddressSpace)
+	{
+		$s.addressSpace = $subnet.AddressSpace
+	}
+	if($subnet.NetworkSite)
+	{
+		$s.networkSite = $subnet.NetworkSite
+	}
+	if($subnet.NetworkType)
+	{
+		$s.networkType = $subnet.NetworkType.ToString()
+	}
+	
+	if($subnet.CustomConfiguration)
+	{
+		$customConfig = $subnet.CustomConfiguration -split ";"
+		$c = @{}
+		
+		foreach ($line in $customConfig)
+		{
+			$key = ($line -split "=")[0]
+			$value = ($line -split "=")[1]
+			if ($key -ne "")
+			{
+				$c.$key = $value
+			}
+		}
+		$s.customConfiguration = $c
+	}
+	return $s
+}
+
 try {
     Import-Module IpamServer
  }
@@ -236,22 +304,28 @@ $check_mode = Get-AnsibleParam -obj $params -name "_ansible_check_mode" -type "b
 $addressCategory = Get-AnsibleParam -obj $params -name "addressCategory" -type "str" -validateset "public","private"
 $addressFamily = Get-AnsibleParam -obj $params -name "addressFamily" -type "str" -default "IPv4" -validateset "IPv4","IPv6"
 #
-$state = Get-AnsibleParam -obj $params -name "state" -type "str" -default "present" -validateset "absent","present","query"
+$state = Get-AnsibleParam -obj $params -name "state" -type "str" -default "present" -validateset "absent","present","query","list"
 #
-$context = Get-AnsibleParam -obj $params -name "context" -type "str"
-$site = Get-AnsibleParam -obj $params -name "site" -type "str"
+$customConfiguration = Get-AnsibleParam -obj $params -name "customConfiguration" -type "str" 
 $subnetName = Get-AnsibleParam -obj $params -name "subnetName" -type "str"
 $network = Get-AnsibleParam -obj $params -name "network" -type "str"
-
+#
+$vlan = Get-AnsibleParam -obj $params -name "vlan" -type "str"
+$description = Get-AnsibleParam -obj $params -name "description" -type "str"
+$owner = Get-AnsibleParam -obj $params -name "owner" -type "str"
+$networkType = Get-AnsibleParam -obj $params -name "networkType" -type "str"
+$addressSpace = Get-AnsibleParam -obj $params -name "addressSpace" -type "str"
+$newNetwork = Get-AnsibleParam -obj $params -name "newNetwork" -type "str"
+#
 $result = @{
     changed = $false
 }
 
-# code goes here
 # if state is query, check if the subnet exists in IPAM
 if($state -eq "query")
 {
 	$resultList = @()
+	#search by subnet name
 	if($subnetName)
 	{
 		try
@@ -266,6 +340,7 @@ if($state -eq "query")
 		}
 		
 	}
+	#search by subnet id
 	elseif($network)
 	{
 		try
@@ -289,126 +364,250 @@ if($state -eq "query")
 		$result.msg = "Unable to find matching subnets"
 		Exit-Json -obj $result
 	}
-	
+	# set the query results to return
 	foreach ($subnet in $Subnets)
 	{
-		$s = @{}
-		$s.name = $subnet.Name
-		$s.context = ""
-		$s.site = ""
-		$s.city = ""
-		$s.networkID = $subnet.NetworkId
-		$customConfig = $subnet.CustomConfiguration -split ";"
-
-		foreach ($line in $customConfig)
-			{
-				if ($line -like "Context*")
-				{
-					$s.context = ($line -split "=")[1]
-				}
-				if ($line -like "Site*")
-				{
-					$s.site = ($line -split "=")[1]
-				}
-				if ($line -like "City*")
-				{
-					$s.city = ($line -split "=")[1]
-				}
-			}
-		$resultList += $s
+		$sub = Set-QueryResults -subnet $subnet
+		$resultList += $sub
 	}
-	$result.changed = $true
+	$result.changed = $false
 	$result.subnets = $resultList
 	
 }
-# If state is present, return a list of the subnets
-elseif($state -eq "present")
+# If state is list, return a list of the subnets
+elseif($state -eq "list")
 {
 	$resultList = @()
-	if($context -and $site)
+	$subnetList = @()
+	# get all subnets matching a custom configuration string and address category
+	if($customConfiguration -and $addressCategory)
 	{
-		#get public subnets
-		if ($addressCategory -eq "public")
+		try
 		{
-			try
+			$Blocks = Get-IpamBlock -AddressFamily $addressFamily -AddressCategory $addressCategory
+			if($Blocks.Count -ge 1)
 			{
-				$Subnets = Get-IpamSubnet -AddressFamily $addressFamily | where {$_.CustomConfiguration -Like "*Context=$context;Site=$site*"} | where-object {$_.Owner -eq "DE"}
-			}
-			
-			catch [System.Management.Automation.RuntimeException]
-			{
-				$result.msg = "Unable to find public $addressFamily subnets by site $site and context $context"
-				Exit-Json -obj $result
-			}
-		}
-		# get private subnets
-		elseif ($addressCategory -eq "private")
-		{
-			try
-			{
-				$Subnets = Get-IpamSubnet -AddressFamily $addressFamily | where {$_.CustomConfiguration -Like "*Context=$context;Site=$site*"} | where-object {$_.Owner -ne "DE"}
-			}
-			
-			catch [System.Management.Automation.RuntimeException]
-			{
-				$result.msg = "Unable to find private $addressFamily subnets by site $site and context $context"
-				Exit-Json -obj $result
-			}
-		}
-		# get all the subnets
-		else
-		{
-			try
-			{
-				$Subnets = Get-IpamSubnet -AddressFamily $addressFamily | where {$_.CustomConfiguration -Like "*Context=$context;Site=$site*"}
-			}
-			
-			catch [System.Management.Automation.RuntimeException]
-			{
-				$result.msg = "Unable to find $addressFamily subnets by site $site and context $context"
-				Exit-Json -obj $result
-			}
-		}
-		# fill in the results
-		foreach ($subnet in $Subnets)
-		{
-			$s = @{}
-			$s.name = $subnet.Name
-			$s.context = ""
-			$s.site = ""
-			$s.city = ""
-			$s.networkID = $subnet.NetworkId
-			$customConfig = $subnet.CustomConfiguration -split ";"
-	
-			foreach ($line in $customConfig)
+				foreach($block in $Blocks)
 				{
-					if ($line -like "Context*")
+					try
 					{
-						$s.context = ($line -split "=")[1]
+						$subnetList += Get-IpamSubnet -MappingToBlock $block | where {$_.CustomConfiguration -Like "*$customConfiguration*"}
 					}
-					if ($line -like "Site*")
+					catch [System.Management.Automation.RuntimeException]
 					{
-						$s.site = ($line -split "=")[1]
-					}
-					if ($line -like "City*")
-					{
-						$s.city = ($line -split "=")[1]
+						continue
 					}
 				}
-			$resultList += $s
+			}
+			elseif($Blocks.Count -eq 1)
+			{
+				$subnetList += Get-IpamSubnet -MappingToBlock $Blocks | where {$_.CustomConfiguration -Like "*$customConfiguration*"}
+			}
+			else
+			{
+				$result.msg = "Unable to find $addressCategory $addressFamily subnets with $customConfiguration"
+				Exit-Json -obj $result
+			}
 		}
-		$result.changed = $true
-		$result.subnets = $resultList
+		catch [System.Management.Automation.RuntimeException]
+		{
+			$result.msg = "Unable to find $addressCategory $addressFamily subnets with $customConfiguration"
+			Exit-Json -obj $result
+		}
 	}
+	# get all subnets matching a custom configuration for an address family
+	elseif($customConfiguration)
+	{
+		try
+		{
+			$Blocks = Get-IpamBlock -AddressFamily $addressFamily
+			if($Blocks.Count -ge 1)
+			{
+				foreach($block in $Blocks)
+				{
+					try
+					{
+						$subnetList += Get-IpamSubnet -MappingToBlock $block | where {$_.CustomConfiguration -Like "*$customConfiguration*"}
+					}
+					catch [System.Management.Automation.RuntimeException]
+					{
+						continue
+					}
+				}
+			}
+			elseif($Blocks.Count -eq 1)
+			{
+				$subnetList += Get-IpamSubnet -MappingToBlock $Blocks | where {$_.CustomConfiguration -Like "*$customConfiguration*"}
+			}
+			else
+			{
+				$result.msg = "Unable to find $addressCategory $addressFamily subnets with $customConfiguration"
+				Exit-Json -obj $result
+			}
+		}
+		catch [System.Management.Automation.RuntimeException]
+		{
+			$result.msg = "Unable to find $addressCategory $addressFamily subnets with $customConfiguration"
+			Exit-Json -obj $result
+		}
+	}
+	# get all the subnets
 	else
 	{
-		$result.msg = "Nothing to search"
-		Exit-Json -obj $result
+		try
+		{
+			$Blocks = Get-IpamBlock -AddressFamily $addressFamily -AddressCategory $addressCategory
+			if($Blocks.Count -ge 1)
+			{
+				foreach($block in $Blocks)
+				{
+					$subnetList += Get-IpamSubnet -AddressFamily $addressFamily 
+				}
+			}
+			elseif($Blocks.Count -eq 1)
+			{
+				$subnetList += Get-IpamSubnet -AddressFamily $addressFamily
+			}
+			else
+			{
+				$result.msg = "Unable to find $addressCategory $addressFamily subnets"
+				Exit-Json -obj $result
+			}
+		}
+		catch [System.Management.Automation.RuntimeException]
+		{
+			$result.msg = "Unable to find $addressCategory $addressFamily subnets"
+			Exit-Json -obj $result
+		}
 	}
+	# fill in the results
+	foreach ($subnet in $subnetList)
+	{
+		$sub = Set-QueryResults -subnet $subnet
+		$resultList += $sub
+	}
+	$result.numberOfSubnets = $subnetList.Count
+	$result.changed = $false
+	$result.subnets = $resultList
 }
+#remove a subnet
+elseif($state -eq "absent")
+{
+	try
+	{
+		Remove-IpamSubnet -NetworkId $network -DeleteAssociatedRanges -DeleteAssociatedAddresses -Force
+	}
+	catch [System.Management.Automation.RuntimeException]
+	{
+		Fail-Json $result  "unable to delete networkid $network"
+	}
+	$result.msg = "removed $network"
+	$result.changed = $true
+}
+# if state -eq present
+# create or modify the subnet
 else
 {
-	Fail-Json $result "Invalid state"
+	# check if the subnet exists
+	$exists = $false
+	try
+	{
+		$ipamSubnet = Get-IpamSubnet -NetworkId $network
+		$exists = $true
+	}
+	catch [System.Management.Automation.RuntimeException]
+	{
+		$exists = $false
+	}
+	#if it exists, modify the properties
+	if($exists)
+	{
+		try
+		{	
+			if($vlan)
+			{
+				Set-IpamSubnet -NetworkId $network -VlanId $vlan
+			}
+			if($description)
+			{
+				Set-IpamSubnet -NetworkId $network -Description $description 
+			}
+			if($customConfiguration)
+			{
+				Set-IpamSubnet -NetworkId $network -AddCustomConfiguration "$customConfiguration"
+			}
+			if($owner)
+			{
+				Set-IpamSubnet -NetworkId $network -Owner $owner
+			}
+			if($networkType)
+			{
+				Set-IpamSubnet -NetworkId $network --NewNetworkType $networkType
+			}
+			if($addressSpace)
+			{
+				Set-IpamSubnet -NetworkId $network -NewAddressSpace $addressSpace
+			}
+		}
+		catch [System.Management.Automation.RuntimeException]
+		{
+			$exists = $false
+		}
+		
+		$resultList = @()
+		$subnet = Get-IpamSubnet -NetworkId $network
+		$sub = Set-QueryResults -subnet $subnet
+		$result.changed = $true
+		$resultList += $sub
+		$result.subnets = $resultList
+		$result.msg = "modified $network"
+		Exit-Json -obj $result
+	}
+	# if it doesn't exist, try to add it
+	else
+	{
+		try
+		{
+			Add-IpamSubnet -Name $subnetName -NetworkId $network
+		}
+		catch [System.Management.Automation.RuntimeException]
+		{
+			Fail-Json $result  "unable to add $subnetName with networkid $network"
+		}
+		
+		if($vlan)
+		{
+			Set-IpamSubnet -NetworkId $network -VlanId $vlan
+		}
+		if($description)
+		{
+			Set-IpamSubnet -NetworkId $network -Description $description 
+		}
+		if($customConfiguration)
+		{
+			Set-IpamSubnet -NetworkId $network -AddCustomConfiguration "$customConfiguration"
+		}
+		if($owner)
+		{
+			Set-IpamSubnet -NetworkId $network -Owner $owner
+		}
+		if($networkType)
+		{
+			Set-IpamSubnet -NetworkId $network -NewNetworkType $networkType
+		}
+		if($addressSpace)
+		{
+			Set-IpamSubnet -NetworkId $network -NewAddressSpace $addressSpace
+		}
+		$resultList = @()
+		$subnet = Get-IpamSubnet -NetworkId $network
+		$sub = Set-QueryResults -subnet $subnet
+		$result.changed = $true
+		$resultList += $sub
+		$result.subnets = $resultList
+		$result.msg = "created $network"
+		Exit-Json -obj $result
+	}
 }
 
 # result objects

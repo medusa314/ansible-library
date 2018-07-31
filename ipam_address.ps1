@@ -214,43 +214,180 @@ Function Set-Attr($obj, $name, $value)
         $obj | Add-Member -Force -MemberType NoteProperty -Name $name -Value $value
     }
 }
-
+# Sets results for query.  Assumes a valid Subnet object is passed as a parameter.
+Function Set-SubnetResults($subnet)
+{
+	$s = @{}
+	$s.name = $subnet.Name
+	$s.networkID = $subnet.NetworkId
+	$s.overlap = $subnet.Overlapping
+	if($subnet.Description)
+	{
+		$s.description = $subnet.Description
+	}
+	$s.totalAddresses = $subnet.TotalAddresses
+	if($subnet.VlanID)
+	{
+		$s.vlan = $subnet.VlanID
+	}
+	if($subnet.CustomerAddressSpace)
+	{
+		$s.vlan = $subnet.CustomerAddressSpace
+	}
+	if($subnet.Owner)
+	{
+		$s.owner = $subnet.Owner
+	}
+	if($subnet.AssignedAddresses)
+	{
+		$addresses = @{}
+		$addresses.assigned = $subnet.AssignedAddresses
+		$addresses.percentageUtilized = $subnet.PercentageUtilized
+		$addresses.utilized = $subnet.UtilizedAddresses
+		$s.addresses = $addresses
+	}
+	if($subnet.VmmLogicalNetwork)
+	{
+		$s.vmmLogicalNetwork = $subnet.VmmLogicalNetwork
+	}
+	if($subnet.AddressSpace)
+	{
+		$s.addressSpace = $subnet.AddressSpace
+	}
+	if($subnet.NetworkSite)
+	{
+		$s.networkSite = $subnet.NetworkSite
+	}
+	if($subnet.NetworkType)
+	{
+		$s.networkType = $subnet.NetworkType.ToString()
+	}
+	
+	if($subnet.CustomConfiguration)
+	{
+		$customConfig = $subnet.CustomConfiguration -split ";"
+		$c = @{}
+		
+		foreach ($line in $customConfig)
+		{
+			$key = ($line -split "=")[0]
+			$value = ($line -split "=")[1]
+			if ($key -ne "")
+			{
+				$c.$key = $value
+			}
+		}
+		$s.customConfiguration = $c
+	}
+	return $s
+}
+Function Set-RangeResults($range)
+{
+	$r = @{}
+	if($range.Description)
+	{
+		$r.description = $range.Description
+	}
+	$r.assignmentType = $range.AssignmentType.ToString()
+	$r.managedByService = $range.ManagedByService
+	
+	if($range.AssignedAddresses)
+	{
+		$addresses = @{}
+		$addresses.assigned = $range.AssignedAddresses
+		$addresses.percentageUtilized = $range.PercentageUtilized
+		$addresses.utilized = $range.UtilizedAddresses
+		$r.addresses = $addresses
+	}
+	if($range.DhcpScopeName)
+	{
+		$d = @{}
+		$d.scopeName = $range.DhcpScopeName	
+		$d.serverName = $range.DhcpServerName
+		if($range.DnsSuffixes)
+		{
+			$d.dnsSuffixes = $range.DnsSuffixes
+		}
+		if($range.ExclusionRanges)
+		{
+			$d.exclusionRanges = $range.ExclusionRanges
+		}
+		if($range.Gateway)
+		{
+			$d.gateway = $range.Gateway
+		}
+		if($range.AssociatedReverseLookupZone)
+		{
+			$d.AssociatedReverseLookupZone = $range.AssociatedReverseLookupZone
+		}
+		if($range.DnsServers)
+		{
+			$d.DnsServers = $range.DnsServers
+		}
+		if($range.WinsServers)
+		{
+			$d.WinsServers = $range.WinsServers
+		}
+		$r.dhcp = $d
+	}
+	
+	if($range.CustomConfiguration)
+	{
+		$customConfig = $range.CustomConfiguration -split ";"
+		$c = @{}
+		
+		foreach ($line in $customConfig)
+		{
+			$key = ($line -split "=")[0]
+			$value = ($line -split "=")[1]
+			if ($key -ne "")
+			{
+				$c.$key = $value
+			}
+		}
+		$r.customConfiguration = $c
+	}
+	return $r
+}
 # Sets results for query
 Function Set-QueryResults($ipaddress)
 {
-	$result.ip = $ipaddress.IpAddress.IPAddressToString
-	$result.name = $ipaddress.DeviceName
-	$result.description = $ipaddress.Description
-	
-	$startRange = $ipaddress.IPRange.split("-")[0]
-	$endRange = $ipaddress.IPRange.split("-")[1]
-	$Range = Get-IpamRange -StartIPAddress $startRange -EndIPAddress $endRange
-	$result.rangeName = $Range.Description
-	$result.category = $ipaddress.AddressCategory.ToString().ToLower()
+	$rip = @{}
+	$rip.ip = $ipaddress.IpAddress.IPAddressToString
+	if($ipaddress.Description)
+	{
+		$rip.description = $ipaddress.Description
+	}
+	if($ipaddress.DeviceName)
+	{
+		$rip.name = $ipaddress.DeviceName
+	}
+	if($ipaddress.AddressCategory)
+	{
+		$rip.category = $ipaddress.AddressCategory.ToString().ToLower()
 		
-	# get the subnet to get the custom configuration
-	$Subnet = Get-IpamSubnet -NetworkId $Range.NetworkID
-	$customConfig = $Subnet.CustomConfiguration -split ";"
-	$result.subnetName = $Subnet.Name
-	
-	foreach ($line in $customConfig)
-		{
-			if ($line -like "Context*")
-			{
-				$result.context = ($line -split "=")[1]
-			}
-			if ($line -like "Site*")
-			{
-				$result.site = ($line -split "=")[1]
-			}
-			if ($line -like "Device*")
-			{
-				$result.device = ($line -split "=")[1]
-			}
-		}
-	$result.startRange = $startRange
-	$result.endRange = $endRange
-	$result.msg = "query successful"
+	}
+	try
+	{
+		# get the range configuration
+		$startRange = $ipaddress.IPRange.split("-")[0]
+		$endRange = $ipaddress.IPRange.split("-")[1]
+		$Range = Get-IpamRange -StartIPAddress $startRange -EndIPAddress $endRange
+		$ran = Set-RangeResults($Range)
+		$rip.range = $ran
+		$rip.startRange = $startRange
+		$rip.endRange = $endRange
+		# get the subnet configuration
+		$Subnet = Get-IpamSubnet -NetworkId $Range.NetworkID
+		$sub = Set-SubnetResults($Subnet)
+		$rip.subnet = $sub
+		$rip.msg = "query successful"
+	}	
+	catch [System.Management.Automation.RuntimeException]
+	{
+		$rip.msg = "unmapped IP"
+	}
+	return $rip
 }
 
 try {
@@ -279,14 +416,14 @@ $ipAddressState = Get-AnsibleParam -obj $params -name "ipAddressState" -type "st
 $instance = Get-AnsibleParam -obj $params -name "instance" -type "str" -default "localhost"
 $assignmentType = Get-AnsibleParam -obj $params -name "type" -type "str" -default "Static" -validateset "Static","Dynamic"
 #
-$state = Get-AnsibleParam -obj $params -name "state" -type "str" -default "present" -validateset "absent","present","query","create","modify"
+$state = Get-AnsibleParam -obj $params -name "state" -type "str" -default "present" -validateset "absent","present","query"
 #
 $startRange = Get-AnsibleParam -obj $params -name "startRange" -type "str"
 $endRange = Get-AnsibleParam -obj $params -name "endRange" -type "str"
-$context = Get-AnsibleParam -obj $params -name "context" -type "str"
-$site = Get-AnsibleParam -obj $params -name "site" -type "str"
+$customConfiguration = Get-AnsibleParam -obj $params -name "customConfiguration" -type "str"
 $ip = Get-AnsibleParam -obj $params -name "ip" -type "str"
 $hostname = Get-AnsibleParam -obj $params -name "hostname" -type "str"
+$numberOfAddresses = Get-AnsibleParam -obj $params -name "numberOfAddresses" -type "int" -default 1
 #
 $description = Get-AnsibleParam -obj $params -name "description" -type "str" -default "host"
 #
@@ -310,7 +447,9 @@ if($state -eq "query")
 			$result.msg = "Unable to find ip $ip"
 			Exit-Json -obj $result
 		}
-		Set-QueryResults -ipaddress $queryIP
+		$resultList = @()
+		$resultList += Set-QueryResults -ipaddress $queryIP
+		$result.ips = $resultList
 	}
 	elseif($hostname)
 	{
@@ -323,157 +462,15 @@ if($state -eq "query")
 			$result.msg = "Unable to find host $hostname by name"
 			Exit-Json -obj $result
 		}
-		Set-QueryResults -ipaddress $queryIP
+		$resultList = @()
+		$resultList += Set-QueryResults -ipaddress $queryIP
+		$result.ips = $resultList
 	}
 	else
 	{
 		$result.msg = "No query parameter.  Enter ip or hostname"
 		Exit-Json -obj $result
 	}
-}
-# If state is present, find a free IP address
-elseif($state -eq "present")
-{
-	if ($startRange -and $endRange)
-	{
-		try
-		{
-			$Range = Get-IpamRange -StartIPAddress $startRange -EndIPAddress $endRange
-			$result.rangeName = $Range.Description
-			$availableIP = $Range.AssignedAddresses - $Range.UtilizedAddresses
-		}
-		
-		catch [System.Management.Automation.RuntimeException]
-		{
-			$result.msg = "Failed to retrieve provided range start $startRange end $endRange"
-			Exit-Json -obj $result
-		}
-		if ($Range.PercentageUtilized -eq 100)
-		{
-			Fail-Json $result "Range has no available IPs."
-		}
-		else
-		{
-			$available = $Range | Find-IpamFreeAddress -NumAddress $availableIP -TestReachability
-			
-			Foreach($a in $available)
-			{
-				if($a.PingStatus -eq "Reply")
-				{
-					continue
-				}
-				else
-				{
-					$ipResult = $a.Address
-					break
-				}		
-			}
-			try
-			{
-				$result.ip = $ipResult
-				$Subnet = Get-IpamSubnet -NetworkId $Range.NetworkID
-				$customConfig = $Subnet.CustomConfiguration -split ";"
-				$result.subnetName = $Subnet.Name
-				$result.rangeName = $Range.Description
-				foreach ($line in $customConfig)
-				{
-					if ($line -like "Context*")
-					{
-						$result.context = ($line -split "=")[1]
-					}
-					if ($line -like "Site*")
-					{
-						$result.site = ($line -split "=")[1]
-					}
-					if ($line -like "Device*")
-					{
-						$result.device = ($line -split "=")[1]
-					}
-				}			
-			}
-			catch [System.Management.Automation.RuntimeException]
-			{
-				Fail-Json $result "Range has no available IPs. **  There are reachable IPs not in IPAM **"
-			}
-		}
-	}
-	elseif($addressCategory -eq "public")
-	{
-	   $result.category = $addressCategory
-		if ($context -and $site)
-		{
-			try
-			{
-				$Subnets = Get-IpamSubnet -AddressFamily $addressFamily | where {$_.CustomConfiguration -Like "*Context=$context;Site=$site*"} | where-object {$_.Owner -eq "DE"} | Sort-object PercentageUtilized
-			}
-			
-			catch [System.Management.Automation.RuntimeException]
-			{
-				$result.msg = "Failed to search $addressCategory with site $site and context $context"
-				Exit-Json -obj $result
-			}
-			
-			if ($Subnets[0].PercentageUtilized -lt 100)
-			{
-				try
-				{
-					$Ranges = Get-IpamRange -MappingToSubnet $Subnets[0] | Sort-object PercentageUtilized
-				}
-				
-				catch [System.Management.Automation.RuntimeException]
-				{
-					$result.msg = "Failed to retrieve ranges for subnet"
-					Exit-Json -obj $result
-				}
-				if ($Ranges[0].PercentageUtilized -lt 100)
-				{
-					$result.ip = $Ranges[0] | Find-IpamFreeAddress | ForEach-Object {$_.Address}
-					$result.subnetName = $Subnets[0].Name
-					$result.rangeName = $Ranges[0].Description
-					$startRange = $Ranges[0].StartIPAddress
-					$endRange = $Ranges[0].EndIPAddress
-					
-					$Subnet = Get-IpamSubnet -NetworkId $Ranges[0].NetworkID
-					$customConfig = $Subnets[0].CustomConfiguration -split ";"
-					foreach ($line in $customConfig)
-					{
-						if ($line -like "Context*")
-						{
-							$result.context = ($line -split "=")[1]
-						}
-						if ($line -like "Site*")
-						{
-							$result.site = ($line -split "=")[1]
-						}
-						if ($line -like "Device*")
-						{
-							$result.device = ($line -split "=")[1]
-						}
-					}
-				}
-				else
-				{
-					Fail-Json $result "Failed to find range with an available IP."
-				}
-			}
-			else
-			{
-				Fail-Json $result "No available IPs."
-			}
-		}
-		else
-		{
-			Fail-Json $result "Missing parameters to search - site and firewall context required."
-		}
-	}
-	else
-	{
-		$result.startRange = $startRange
-		$result.endRange = $endRange
-		Fail-Json $result "Missing parameter(s) to assign IP address"
-	}
-	$result.startRange = $startRange
-	$result.endRange = $endRange
 }
 # remove IP from IPAM
 elseif($state -eq "absent")
@@ -489,49 +486,206 @@ elseif($state -eq "absent")
 		Exit-Json -obj $result
 	}
 	$result.msg = "removed ip $ip"
-	$result.ip = $ip
-}
-# create IP in IPAM
-elseif($state -eq "create")
-{
-	try
-	{
-		Add-IpamAddress -IpAddress $ip -Description $description -ManagedByService $service -ServiceInstance $instance  -DeviceType $deviceType -IpAddressState $ipAddressState  -AssignmentType $assignmentType
-	}
-	
-	catch [System.Management.Automation.RuntimeException]
-	{
-		$result.msg = "Unable to create ip $ip"
-		Exit-Json -obj $result
-	}
-	$result.ip = $ip
-	$result.description = $description
-	$result.msg = "Created $ip"
-}
-# create IP in IPAM
-elseif($state -eq "modify")
-{
-	try
-	{
-		Get-IpamAddress -IpAddress $ip | Set-IpamAddress -Description $description -NewManagedByService $service -NewServiceInstance $instance -DeviceType $deviceType -IpAddressState $ipAddressState  -AssignmentType $assignmentType
-	}
-	
-	catch [System.Management.Automation.RuntimeException]
-	{
-		$result.msg = "Unable to modify ip $ip"
-		Exit-Json -obj $result
-	}
-	$result.ip = $ip
-	$result.description = $description
-	$result.msg = "Modified $ip"
+	$result.changed = $true
 }
 else
 {
-	Fail-Json $result "Invalid state"
+	$ips = @()
+	$numFound = 0
+	$exists = $false
+	if($ip)
+	{
+		# modify an existing IP
+		try
+		{
+			Get-IpamAddress -IpAddress $ip | Set-IpamAddress -Description $description -NewManagedByService $service -NewServiceInstance $instance -DeviceType $deviceType -IpAddressState $ipAddressState  -AssignmentType $assignmentType
+			$exists = $true
+			#get results after the modification
+			$queryIP = Get-IpamAddress -IpAddress $ip
+			$resultList = @()
+			$resultList += Set-QueryResults -ipaddress $queryIP
+			$result.ips = $resultList
+			$result.msg = "Modified $ip"
+			$result.changed = $true
+			Exit-Json -obj $result
+		}
+		catch [System.Management.Automation.RuntimeException]
+		{
+			$exists = $false
+		}
+		
+		#add the IP address
+		try
+		{
+			Add-IpamAddress -IpAddress $ip -Description $description -ManagedByService $service -ServiceInstance $instance  -DeviceType $deviceType -IpAddressState $ipAddressState  -AssignmentType $assignmentType
+			$queryIP = Get-IpamAddress -IpAddress $ip
+			$resultList = @()
+			$resultList += Set-QueryResults -ipaddress $queryIP
+			$result.ips = $resultList
+			$result.msg = "Created $ip"
+			$result.changed = $true
+			
+		}
+		catch [System.Management.Automation.RuntimeException]
+		{
+			$result.msg = "Unable to create ip $ip"
+			Exit-Json -obj $result
+		}
+	}
+	elseif ($startRange -and $endRange)
+	{
+		try
+		{
+			$Range = Get-IpamRange -StartIPAddress $startRange -EndIPAddress $endRange
+			$availableIP = $Range.AssignedAddresses - $Range.UtilizedAddresses
+		}
+		
+		catch [System.Management.Automation.RuntimeException]
+		{
+			$result.msg = "Failed to retrieve provided range start $startRange end $endRange"
+			Exit-Json -obj $result
+		}
+		if($availableIP -le $numberOfAddresses)
+		{
+			Fail-Json $result "Not enough available IPs"
+		}
+		if ($Range.PercentageUtilized -eq 100)
+		{
+			Fail-Json $result "Range has no available IPs."
+		}
+		else
+		{
+			try
+			{
+				$available = $Range | Find-IpamFreeAddress -NumAddress $availableIP -TestReachability
+				
+				foreach($a in $available)
+				{
+					if($a.PingStatus -eq "Reply")
+					{
+						continue
+					}
+					else
+					{
+						$ips += $a.Address
+						$numFound += 1
+						if($numFound -eq $numberOfAddresses)
+						{
+							break
+						}
+						else
+						{
+							continue
+						}
+					}		
+				}
+				$result.ips = $ips		
+			}
+			catch [System.Management.Automation.RuntimeException]
+			{
+				Fail-Json $result "Range does not have enough available IPs. **  There mmay be reachable IPs not in IPAM **"
+			}
+		}
+	}
+	elseif($addressCategory -and $customConfiguration)
+	{
+		$Subnets = @()
+	   $result.category = $addressCategory
+		try
+		{
+			$Blocks = Get-IpamBlock -AddressFamily $addressFamily -AddressCategory $addressCategory
+			if($Blocks.Count -ge 1)
+			{
+				foreach($block in $Blocks)
+				{
+					try
+					{
+						$Subnets += Get-IpamSubnet -MappingToBlock $block | where {$_.CustomConfiguration -Like "*$customConfiguration*"} | Sort-object PercentageUtilized
+					}
+					catch [System.Management.Automation.RuntimeException]
+					{
+						continue
+					}
+				}
+			}
+			elseif($Blocks.Count -eq 1)
+			{
+				$Subnets += Get-IpamSubnet -MappingToBlock $Blocks | where {$_.CustomConfiguration -Like "*$customConfiguration*"}
+			}
+			else
+			{
+				$result.msg = "Unable to find $addressCategory $addressFamily subnets with $customConfiguration"
+				Exit-Json -obj $result
+			}
+		}
+		catch [System.Management.Automation.RuntimeException]
+		{
+			$result.msg = "Unable to find $addressCategory $addressFamily subnets with $customConfiguration"
+			Exit-Json -obj $result
+		}
+	   	
+	   	foreach($sub in $Subnets)
+	   	{
+	   		if ($sub.PercentageUtilized -lt 100 -and $sub.AssignedAddresses -ge 0)
+	   		{
+	   			$Ranges = Get-IpamRange -MappingToSubnet $sub | Sort-object PercentageUtilized
+	   			foreach($r in $Ranges)
+	   			{
+	   				if($r.PercentageUtilized -lt 100)
+	   				{
+	   					$Range = $r
+	   					$Subnet = $sub
+	   					break
+	   				}
+	   			}
+	   			break
+	   		}
+	   	}
+        try
+        {
+			$availableIP = $Range.AssignedAddresses - $Range.UtilizedAddresses
+			$startRange = $Range.StartIPAddress
+			$endRange = $Range.EndIPAddress
+			
+			$available = $Range | Find-IpamFreeAddress -NumAddress $availableIP -TestReachability
+		
+			foreach($a in $available)
+			{
+				if($a.PingStatus -eq "Reply")
+				{
+					continue
+				}
+				else
+				{
+					$ips += $a.Address
+					$numFound += 1
+					if($numFound -eq $numberOfAddresses)
+					{
+						break
+					}
+					else
+					{
+						continue
+					}
+				}		
+			}
+			$result.ips = $ips
+		}
+		catch [System.Management.Automation.RuntimeException]
+		{
+			$result.msg = "Unable to find $addressCategory $addressFamily subnets with $customConfiguration"
+			Exit-Json -obj $result
+		}
+	}
+	else
+	{
+		$result.startRange = $startRange
+		$result.endRange = $endRange
+		Fail-Json $result "Missing parameter(s) to configure IP address in IPAM"
+	}
 }
 
 # result objects
-$result.changed = $true
 $result.state = $state
 
 Exit-Json -obj $result

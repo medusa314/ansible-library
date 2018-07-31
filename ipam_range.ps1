@@ -215,25 +215,141 @@ Function Set-Attr($obj, $name, $value)
     }
 }
 
- 
-# Gets and IPAM range and returns the needed variables
-# Example: Set-Attr $result "changed" $true
-Function Get-Range($start, $end)
+# Sets results for query.  Assumes a valid Subnet object is passed as a parameter.
+Function Set-SubnetResults($subnet)
 {
-	try
+	$s = @{}
+	$s.name = $subnet.Name
+	$s.networkID = $subnet.NetworkId
+	$s.overlap = $subnet.Overlapping
+	if($subnet.Description)
 	{
-		$Range = Get-IpamRange -StartIPAddress $start -EndIPAddress $end
+		$s.description = $subnet.Description
 	}
-	catch [System.Management.Automation.RuntimeException]
+	$s.totalAddresses = $subnet.TotalAddresses
+	if($subnet.VlanID)
 	{
-		$result.msg = "Unable to query range $startRange - $endRange"
-		Exit-Json -obj $result
+		$s.vlan = $subnet.VlanID
 	}
-	$result.subnet = $Range.NetworkID
-	$result.rangeName = $Range.Description
-	$result.size = $Range.AssignedAddresses
-	$result.used = $Range.UtilizedAddresses
-	$result.percentUtilized = $Range.PercentageUtilized
+	if($subnet.CustomerAddressSpace)
+	{
+		$s.vlan = $subnet.CustomerAddressSpace
+	}
+	if($subnet.Owner)
+	{
+		$s.owner = $subnet.Owner
+	}
+	if($subnet.AssignedAddresses)
+	{
+		$addresses = @{}
+		$addresses.assigned = $subnet.AssignedAddresses
+		$addresses.percentageUtilized = $subnet.PercentageUtilized
+		$addresses.utilized = $subnet.UtilizedAddresses
+		$s.addresses = $addresses
+	}
+	if($subnet.VmmLogicalNetwork)
+	{
+		$s.vmmLogicalNetwork = $subnet.VmmLogicalNetwork
+	}
+	if($subnet.AddressSpace)
+	{
+		$s.addressSpace = $subnet.AddressSpace
+	}
+	if($subnet.NetworkSite)
+	{
+		$s.networkSite = $subnet.NetworkSite
+	}
+	if($subnet.NetworkType)
+	{
+		$s.networkType = $subnet.NetworkType.ToString()
+	}
+	
+	if($subnet.CustomConfiguration)
+	{
+		$customConfig = $subnet.CustomConfiguration -split ";"
+		$c = @{}
+		
+		foreach ($line in $customConfig)
+		{
+			$key = ($line -split "=")[0]
+			$value = ($line -split "=")[1]
+			if ($key -ne "")
+			{
+				$c.$key = $value
+			}
+		}
+		$s.customConfiguration = $c
+	}
+	return $s
+}
+# Sets results for query.  Assumes a valid Range object is passed as a parameter.
+Function Set-RangeResults($range)
+{
+	$r = @{}
+	if($range.Description)
+	{
+		$r.description = $range.Description
+	}
+	$r.assignmentType = $range.AssignmentType.ToString()
+	$r.managedByService = $range.ManagedByService
+	
+	if($range.AssignedAddresses)
+	{
+		$addresses = @{}
+		$addresses.assigned = $range.AssignedAddresses
+		$addresses.percentageUtilized = $range.PercentageUtilized
+		$addresses.utilized = $range.UtilizedAddresses
+		$r.addresses = $addresses
+	}
+	if($range.DhcpScopeName)
+	{
+		$d = @{}
+		$d.scopeName = $range.DhcpScopeName	
+		$d.serverName = $range.DhcpServerName
+		if($range.DnsSuffixes)
+		{
+			$d.dnsSuffixes = $range.DnsSuffixes
+		}
+		if($range.ExclusionRanges)
+		{
+			$d.exclusionRanges = $range.ExclusionRanges
+		}
+		if($range.Gateway)
+		{
+			$d.gateway = $range.Gateway
+		}
+		if($range.AssociatedReverseLookupZone)
+		{
+			$d.AssociatedReverseLookupZone = $range.AssociatedReverseLookupZone
+		}
+		if($range.DnsServers)
+		{
+			$d.DnsServers = $range.DnsServers
+		}
+		if($range.WinsServers)
+		{
+			$d.WinsServers = $range.WinsServers
+		}
+		$r.dhcp = $d
+	}
+	
+	if($range.CustomConfiguration)
+	{
+		$customConfig = $range.CustomConfiguration -split ";"
+		$c = @{}
+		
+		foreach ($line in $customConfig)
+		{
+			$key = ($line -split "=")[0]
+			$value = ($line -split "=")[1]
+			if ($key -ne "")
+			{
+				$c.$key = $value
+			}
+		}
+		$r.customConfiguration = $c
+	}
+	return $r
 }
 
 try {
@@ -255,12 +371,12 @@ $check_mode = Get-AnsibleParam -obj $params -name "_ansible_check_mode" -type "b
 # -validateset.
 # 
 $state = Get-AnsibleParam -obj $params -name "state" -type "str" -default "present" -validateset "absent","present","query","list"
-#IPAM search variables
+# IPAM search variables
 $startRange = Get-AnsibleParam -obj $params -name "startRange" -type "str"
 $endRange = Get-AnsibleParam -obj $params -name "endRange" -type "str"
 $subnet = Get-AnsibleParam -obj $params -name "subnet" -type "str"
 $size = Get-AnsibleParam -obj $params -name "size" -type "int"
-$name = Get-AnsibleParam -obj $params -name "name" -type "str"
+$description = Get-AnsibleParam -obj $params -name "description" -type "str" -default ""
 $removeIP = Get-AnsibleParam -obj $params -name "removeIP" -type "bool" -default $false
 $rangeName = Get-AnsibleParam -obj $params -name "rangeName" -type "str"
 #
@@ -272,10 +388,20 @@ $result = @{
 # returns the range if a provided IP
 if($state -eq "query")
 {
+	#query by start and end ip address
 	if($startRange -and $endRange)
 	{
-		Get-Range -start $startRange -end $endRange
+		try
+		{
+			$Range = get-ipamrange -StartIPAddress $startRange -EndIPAddress $endRange
+		}
+		catch [System.Management.Automation.RuntimeException]
+		{
+			$result.msg = "Unable to find range"
+			Exit-Json -obj $result
+		}
 	}
+	# query by the description
 	elseif($rangeName)
 	{
 		try
@@ -287,49 +413,21 @@ if($state -eq "query")
 			$result.msg = "Unable to find range $rangeName"
 			Exit-Json -obj $result
 		}
-		$result.subnet = $Range.NetworkID
-		$result.rangeName = $Range.Description
-		$result.size = $Range.AssignedAddresses
-		$result.used = $Range.UtilizedAddresses
-		$result.percentUtilized = $Range.PercentageUtilized
+		
 	}
 	else
 	{
-		$result.msg = "No query parameter.  Enter ip or range name"
+		$result.msg = "Missing query parameters."
 		Exit-Json -obj $result
 	}
+	# set the result
+	$result.ranges = Set-RangeResults -range $Range
+	$Subnet = Get-IpamSubnet -NetworkId $Range.NetworkID
+	$result.subnet = Set-SubnetResults -subnet $Subnet
 	$result.startRange = $startRange
 	$result.endRange = $endRange
 }
-# If state is present assign a free range
-elseif($state -eq "present")
-{
-	if($size -and $subnet -and $name)
-	{
-		try
-		{
-			$ipamSubnet = Get-IpamSubnet -NetworkId $subnet
-		}
-		catch
-		{
-			$result.msg = "Unable to find subnet $subnet"
-			Exit-Json -obj $result
-		}
-		$ipamRange = Find-IpamFreeRange -InputObject $ipamSubnet -NumberOfAddresses $size
-		$startRange = $ipamRange.StartIPAddress.IPAddressToString
-		$endRange = $ipamRange.EndIPAddress.IPAddressToString
-		$networkID = $ipamRange.NetworkID
-		$range = Add-IpamRange -NetworkId $networkID -StartIPAddress $startRange -EndIPAddress $endRange -description $name
-		# call the function to get the custom configuration
-		Get-Range -start $startRange -end $endRange
-	}
-	else
-	{
-		Fail-Json $result "Missing parameter(s) to get free range"
-	}
-	$result.startRange = $startRange
-	$result.endRange = $endRange
-}
+# return a list of ranges in a subnet
 elseif($state -eq "list")
 {
 	if($subnet)
@@ -343,28 +441,19 @@ elseif($state -eq "list")
 			$result.msg = "Unable to find subnet $subnet"
 			Exit-Json -obj $result
 		}
+		$result.subnet = Set-SubnetResults -subnet $ipamSubnet
+		$resultList = @()
 		$ipamRanges = Get-IpamRange -MappingToSubnet $ipamSubnet
-		$subnetRanges =  @{
-			networkID = $ipamSubnet.NetworkId
-			subnetName = $ipamSubnet.Name
-			ranges = @()
-		}
 		foreach ($r in $ipamRanges)
 		{
-			$subnetRanges.ranges += @{
-			name = $r.Description
-			start = $r.StartIPAddress
-			end = $r.EndIPAddress
-			percentUtilized = $r.PercentageUtilized
-			numberUtilized = $r.UtilizedAddresses
-			numberAvailable = ($r.AssignedAddresses - $r.UtilizedAddresses)}
+			$resultList += Set-RangeResults -range $r
 		}
 	}
 	else
 	{
-		Fail-Json $result "Missing parameter(s) to get free range"
+		Fail-Json $result "Missing parameter to get list ranges"
 	}
-	$result.subnet = $subnetRanges
+
 }
 # if state is absent, remove the range.  If $removeIP is set, it will also delete the associated IP addresses
 elseif($state -eq "absent")
@@ -399,15 +488,67 @@ elseif($state -eq "absent")
 	}
 	$result.startRange = $startRange
 	$result.endRange = $endRange
+	$result.changed = $true
+	$result.msg = "Removed $startRange - $endRange"
 }
+# create or modify an existing range
 else
 {
-	Fail-Json $result "Invalid state"
+	# try to find a free range by the required size
+	if($size -and $subnet)
+	{
+		try
+		{
+			$ipamSubnet = Get-IpamSubnet -NetworkId $subnet
+			$result.subnet = Set-SubnetResults -subnet $ipamSubnet
+			
+		}
+		catch
+		{
+			$result.msg = "Unable to find subnet $subnet"
+			Exit-Json -obj $result
+		}
+		try
+		{
+			$ipamRange = Find-IpamFreeRange -InputObject $ipamSubnet -NumberOfAddresses $size
+			$startRange = $ipamRange.StartIPAddress.IPAddressToString
+			$endRange = $ipamRange.EndIPAddress.IPAddressToString
+			Add-IpamRange -NetworkId $subnet -StartIPAddress $startRange -EndIPAddress $endRange -description $description
+		}
+		catch
+		{
+			$result.msg = "Unable to find and create range"
+			Exit-Json -obj $result
+		}
+	}
+	# create a range using start and end ip address
+	elseif($startRange -and $endRange -and $subnet)
+	{
+		try
+		{
+			Add-IpamRange -NetworkId $subnet -StartIPAddress $startRange -EndIPAddress $endRange -description $description -CreateSubnetIfNotFound
+		}
+		catch
+		{
+			$result.msg = "Unable to add range in $subnet"
+			Exit-Json -obj $result
+		}
+		
+	}
+	else
+	{
+		Fail-Json $result "Missing parameter(s) for range"
+	}
+	
+	# set range results
+	$Range = Get-IpamRange -StartIPAddress $startRange -EndIPAddress $endRange
+	$result.ranges = Set-RangeResults -range $Range
+	$result.startRange = $startRange
+	$result.endRange = $endRange
+	$result.changed = $true
 }
 
 # result objects
-$result.changed = $true
 $result.state = $state
-
 
 Exit-Json -obj $result
