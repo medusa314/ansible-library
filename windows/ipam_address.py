@@ -43,17 +43,10 @@ options:
         default: null
         choices: []
         aliases: []
-    context:
+    customConfiguration:
         description:
-            - Custom Configuration - firewall context; provide with site
+            - Custom Configuration string
         required: false
-        default: null
-        choices: []
-        aliases: []
-    site:
-        description:
-            - Custom Configuration - device site; provide with context
-        required: true
         default: null
         choices: []
         aliases: []
