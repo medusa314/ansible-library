@@ -307,7 +307,7 @@ $addressFamily = Get-AnsibleParam -obj $params -name "addressFamily" -type "str"
 $state = Get-AnsibleParam -obj $params -name "state" -type "str" -default "present" -validateset "absent","present","query","list"
 #
 $customConfiguration = Get-AnsibleParam -obj $params -name "customConfiguration" -type "str" 
-$subnetName = Get-AnsibleParam -obj $params -name "subnetName" -type "str"
+$name = Get-AnsibleParam -obj $params -name "name" -type "str"
 $network = Get-AnsibleParam -obj $params -name "network" -type "str"
 #
 $vlan = Get-AnsibleParam -obj $params -name "vlan" -type "str"
@@ -326,22 +326,7 @@ if($state -eq "query")
 {
 	$resultList = @()
 	#search by subnet name
-	if($subnetName)
-	{
-		try
-		{
-			$Subnets = Get-IpamSubnet -AddressFamily $addressFamily | where {$_.Description -eq "$subnetName"}
-		}
-		
-		catch [System.Management.Automation.RuntimeException]
-		{
-			$result.msg = "Unable to find subnet by name $subnetName"
-			Exit-Json -obj $result
-		}
-		
-	}
-	#search by subnet id
-	elseif($network)
+	if($network)
 	{
 		try
 		{
@@ -354,6 +339,20 @@ if($state -eq "query")
 			Exit-Json -obj $result
 		}
 	}
+	elseif($name)
+	{
+		try
+		{
+			$Subnets = Get-IpamSubnet -AddressFamily $addressFamily | where {$_.Name -eq "$name"}
+		}
+		
+		catch [System.Management.Automation.RuntimeException]
+		{
+			$result.msg = "Unable to find subnet by name $name"
+			Exit-Json -obj $result
+		}
+		
+	}
 	else
 	{
 		Fail-Json $result "Missing parameter for query"
@@ -362,6 +361,8 @@ if($state -eq "query")
 	if(!$Subnets)
 	{
 		$result.msg = "Unable to find matching subnets"
+		$result.network = $network
+		$result.name = $name
 		Exit-Json -obj $result
 	}
 	# set the query results to return
@@ -568,11 +569,11 @@ else
 	{
 		try
 		{
-			Add-IpamSubnet -Name $subnetName -NetworkId $network
+			Add-IpamSubnet -Name $name -NetworkId $network
 		}
 		catch [System.Management.Automation.RuntimeException]
 		{
-			Fail-Json $result  "unable to add $subnetName with networkid $network"
+			Fail-Json $result  "unable to add $name with networkid $network"
 		}
 		
 		if($vlan)

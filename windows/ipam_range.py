@@ -29,9 +29,9 @@ options:
         default: null
         choices: []
         aliases: []
-    name
+    description
         description:
-            - Name of the range
+            - description of the range
         required: false
         default: null
         choices: []
@@ -72,13 +72,13 @@ ipam_getrange:
   state: query
   
 ipam_getrange: 
-  subnet: "10.94.32.0/23"
+  subnet: "10.4.2.0/24"
   size: 8
-  name: "TEST RANGE"
+  description: "TEST RANGE"
   
 ipam_getrange: 
-  startRange: 10.94.32.28
-  endRange: 10.94.32.35
+  startRange: 10.4.2.28
+  endRange: 10.4.2.35
   state: absent
 '''
 RETURN = '''
@@ -97,29 +97,39 @@ endRange:
     returned: True
     type: string
     sample: 10.1.1.254
-subnet:
-    description:  the network the range belongs to
-    returned: True
-    type: string
-    sample: 10.1.1.0/24
-rangeName:
-    description:  the name of the range
+description:
+    description:  the description of the range
     returned: True
     type: string
     sample: DS-NET-ANSIBLE
-size:
-    description:  the number of assigned addresses
+assignmentType:
+    description:  the type of range
     returned: True
     type: string
-    sample: 8
-used:
-    description:  the number of utilized addresses
+    sample: Static
+managedByService:
+    description:  where the range is managed
     returned: True
     type: string
-    sample: 3
-percentUtilized:
-    description:  the percentage of utilized addresses
+    sample: IPAM
+addresses:
+    description:  the addresses attributes
     returned: True
     type: string
-    sample: 75
+    sample: {assigned: 32, percentageUtilized: 10, utilized: 25}
+subnet:
+    description:  the subnet attributes of the range
+    returned: True
+    type: string
+    sample: {NetworkID: 10.4.2.0/24, overlap: False, vlan: 2, totalAddresses: 256, addresses: {assigned: 32, percentageUtilized: 10, utilized: 25}}
+customConfiguration:
+    description:  the range custom configuration if set
+    returned: True
+    type: string
+    sample: DeviceType=Firewall
+dhcp:
+    description:  the dhcp attributes IPAM is aware of
+    returned: True
+    type: string
+    sample: {scopeName: 'USERS'}
 '''
