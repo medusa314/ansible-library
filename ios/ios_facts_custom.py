@@ -295,7 +295,8 @@ class Interfaces(FactsBase):
             self.populate_ipv4_interfaces(data)
 
         data = self.responses[2]
-        if data:
+        ipv6_errs = ['Invalid input']
+        if data and not any(err in data for err in ipv6_errs):
             data = self.parse_interfaces(data)
             self.populate_ipv6_interfaces(data)
 
@@ -312,7 +313,11 @@ class Interfaces(FactsBase):
         if data and not any(err in data for err in cdp_errs):   
             neighbors = self.run(['show cdp neighbors detail'])
             if neighbors:
-                self.facts['neighbors'] = self.parse_neighbors_cdp(neighbors[0])
+                cdp = self.parse_neighbors_cdp(neighbors[0])
+                try:
+                    self.facts['neighbors'].update(cdp)
+                except KeyError:
+                    self.facts['neighbors'] = cdp
         
         data = self.responses[5]
         if data:
@@ -339,7 +344,7 @@ class Interfaces(FactsBase):
             intf = dict()
             intf['description'] = self.parse_description(value)
             intf['macaddress'] = self.parse_macaddress(value)
-
+            intf['vlan'] = self.parse_vlan(value)
             intf['mtu'] = self.parse_mtu(value)
             intf['bandwidth'] = self.parse_bandwidth(value)
             intf['mediatype'] = self.parse_mediatype(value)
@@ -483,7 +488,12 @@ class Interfaces(FactsBase):
         match = re.search(r'^(?:.+) is (.+),', data, re.M)
         if match:
             return match.group(1)
-
+    
+    def parse_vlan(self, data):
+        match = re.search(r'Encapsulation 802.1Q Virtual LAN, Vlan ID (.+).', data, re.M)
+        if match:
+            return match.group(1).strip()
+        
     def parse_lldp_intf(self, data):
         match = re.search(r'^Local Intf: (.+)$', data, re.M)
         if match:
