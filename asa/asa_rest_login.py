@@ -1,7 +1,9 @@
 #!/usr/bin/env python2.7
+from lib2to3.fixes.fix_input import context
 
 # Copyright (c) 2017 Sybil Melton, Dominion Enterprises
 # GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
+# Extends RASA module written by Patrick Ogenstad <patrick@ogenstad.com> https://github.com/networklore/rasa
 
 DOCUMENTATION = '''
 ---
@@ -65,6 +67,8 @@ import requests
 import json
 import sys
 from requests.auth import HTTPBasicAuth
+import time
+from ansible.module_utils.network.asa.asa import asa_argument_spec
 
 requests.packages.urllib3.disable_warnings()
 
@@ -76,15 +80,20 @@ HEADERS = {
 
 class ASA(object):
 
-    def __init__(self, device=None, username=None, password=None, verify_cert=True, timeout=5):
+    def __init__(self, device=None, username=None, password=None, verify_cert=True, timeout=10, context=None):
         
         self.device = device
         self.username = username
         self.password = password
         self.verify_cert = verify_cert
         self.timeout = timeout
+        self.context = context
         self.cred = HTTPBasicAuth(self.username, self.password)
-
+        
+    def context_set(self):
+        if self.context:
+            return True
+        return False
     ######################################################################
     # General Functions
     ######################################################################
@@ -94,8 +103,14 @@ class ASA(object):
         return data
 
     def _get(self, request):
-        url = 'https://' + self.device + '/api/' + request
-        data = requests.get(url,headers=HEADERS,auth=self.cred, verify=self.verify_cert, timeout=self.timeout)
+        if self.context_set():
+            payload = {'context': self.context}
+            url = 'https://' + self.device + '/api/' + request
+            data = requests.get(url,headers=HEADERS,auth=self.cred, verify=self.verify_cert, timeout=self.timeout, params=payload)
+        else:
+            url = 'https://' + self.device + '/api/' + request
+            data = requests.get(url,headers=HEADERS,auth=self.cred, verify=self.verify_cert, timeout=self.timeout)
+        
         return data
 
     def _patch(self, request, data):
@@ -138,34 +153,6 @@ class ASA(object):
     ######################################################################
     # <OBJECTS>
     ######################################################################
-    # Functions related to network objects, or "object network" in the
-    # ASA configuration
-    ######################################################################
-    def create_networkobject(self, data):
-        request = 'objects/networkobjects'
-        return self._post(request, data)
-
-    def delete_networkobject(self, net_object):
-        request = 'objects/networkobjects/' + net_object
-        return self._delete(request)
-
-    def get_networkobject(self, net_object):
-        request = 'objects/networkobjects/' + net_object
-        return self._get(request)
-
-    def get_networkobjects(self):
-        request = 'objects/networkobjects'
-        return self._get(request)
-
-    #def get_networkservices(self):
-    #    request = 'objects/predefinednetworkservices'
-    #    return self._get(request)
-
-    def update_networkobject(self, name, data):
-        request = 'objects/networkobjects/' + name
-        return self._put(request, data)
-
-
 
     ######################################################################
     # Functions related to network object-groups, or
@@ -279,64 +266,74 @@ class ASA(object):
         request = 'monitoring/serialnumber'
         return self._get(request)
     
-def asa_login(host, user, password):
-    """Login to ASA"""
-    if not host.startswith(('http', 'https')):
-        host = 'https://' + host
-    headers = {'Content-Type': 'application/json'}
-    api_path = "/api/"
-    url = server + api_path
-    f = None
-    req = urllib2.Request(url, None, headers)
-    base64string = base64.encodestring('%s:%s' % (user, password)).replace('\n', '')
-    req.add_header("Authorization", "Basic %s" % base64string)
-    try:
-        f = urllib2.urlopen(req)
-        status_code = f.getcode()
-        if (status_code != 200):
-            print 'Error in get. Got status code: '+ status_code
-        resp = f.read()
-        json_resp = json.loads(resp)
-        moDir = json.dumps(json_resp,sort_keys=True,indent=4, separators=(',', ': '))
-    finally:
-        if f:  f.close()
+    def get_version(self):
+        request = 'monitoring/device/components'
+        return self._get(request)
     
-    return moDir
+    def get_interfaces(self):
+        request = 'monitoring/device/interfaces'
+        return self._get(request)
+    
+    def get_arp(self):
+        request = 'monitoring/arp'
+        return self._get(request)
 
 urllib3.disable_warnings()
 logging.captureWarnings(True)
 
 def main():
-
-    module = AnsibleModule(
-        argument_spec=dict(
-            host=dict(required=True),
-            username=dict(required=True),
-            password=dict(required=True),
-            validate_certs=dict(required=False, choices=[True, False], default=True),
-            provider=dict(required=False)
-        ),
-        supports_check_mode=False
+    spec = dict(
+        # { command: <str>, prompt: <str>, response: <str> }
+        validate_certs=dict(choices=[True, False], default=True),
+        retries=dict(default=3, type='int'),
+        interval=dict(default=1, type='int'),
+        context=dict(required=False)
     )
     
+    spec.update(asa_argument_spec)
+    module = AnsibleModule(argument_spec=spec, supports_check_mode=False)
+    
+    result = {}
+    retries = module.params['retries']
+    interval = module.params['interval']
+    
     dev = ASA(
-        username = module.params['username'],
-        password = module.params['password'],
-        device = module.params['host'],
+        username = module.params['provider']['username'],
+        password = module.params['provider']['password'],
+        device = module.params['provider']['host'],
+        context = module.params['context'],
         verify_cert = module.params['validate_certs']
     )
-
-    try:
-        data = dev.get_serial()
-    except:
-        err = sys.exc_info()[0]
-        module.fail_json(msg='Unable to connect to device: %s' % err)
-
-    if data.status_code == 200:
+    
+    while retries > 1:
+        try:
+            ver = dev.get_interfaces()
+            break
+        except:
+            err = sys.exc_info()[0]
+            time.sleep(interval)
+        retries -= 1
+    
+    if retries == 1:
+        try:
+            ver = dev.get_interfaces()
+        except:
+            err = sys.exc_info()[0]
+            module.fail_json(msg='Unable to connect to device: %s' % err)
+    
+    '''    
+    if data:
+        if data.status_code == 200:
+            return_status = True
+            result['serial'] = data.json()
+        else:
+            module.fail_json(msg='Unable to retrieve serial number: - %s' % data.status_code)
+    ''' 
+    if ver.status_code == 200:
         return_status = True
-        result = data.json()
+        result['version'] = ver.json()
     else:
-        module.fail_json(msg='Unable to retrieve serial number: - %s' % data.status_code)
+        module.fail_json(msg='Unable to retrieve: - %s' % ver.status_code)
 
     return_msg = { 'result': result, 'changed': return_status } 
     module.exit_json(**return_msg)
