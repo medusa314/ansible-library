@@ -187,7 +187,7 @@ def main():
                 arps += int.json()['items']
                 if total > limit:
                     offset += limit
-                    while total - offset > 100:
+                    while total - offset > limit:
                         rem = dev.get_arp(offset, limit)
                         offset += limit
                         arps += rem.json()['items']
@@ -212,7 +212,7 @@ def main():
                 arps += int.json()['items']
                 if total > limit:
                     offset += limit
-                    while total - offset > 100:
+                    while total - offset > limit:
                         rem = dev.get_arp(offset, limit)
                         offset += limit
                         arps += rem.json()['items']
