@@ -1,0 +1,27 @@
+---
+- hosts: nxos
+  connection: local
+  gather_facts: false
+  #strategy: debug
+
+  vars:
+    - USERNAME: "{{ ansible_user.split('@')[0] }}"
+    - DEVICE_PASSWORD: "{{ ansible_password }}"
+      
+  tasks:
+  - set_fact:
+      playbook_name: "{{ playbook_dir }} nxos_tests.yml"
+  - set_fact:      
+      email_results: []
+      
+  - name: Get provider
+    include_tasks: tasks/get_provider.yml
+    
+  - name: facts
+    nxos_facts_custom:
+      provider: "{{ provider }}"
+      gather_subset:
+        - hardware
+    register: nxos
+    
+  - debug: var=nxos

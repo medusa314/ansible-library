@@ -1,0 +1,451 @@
+---
+- hosts: DS-NET-IPAM.de-ent.com
+  gather_facts: false
+#  strategy: debug
+  
+  tasks:
+  - block:
+    - name: IPAM get list of ranges in a subnet
+      ipam_range: 
+        subnet: "10.43.102.0/24"
+        state: list
+      register: lresult
+  
+    - debug:
+        var: lresult
+          
+    - name: IPAM query range that exists
+      ipam_range: 
+        startRange: "10.94.32.52"
+        endRange: "10.94.32.55"
+        state: query
+      register: qresult
+  
+    - debug:
+        var: qresult
+  
+    - name: IPAM query range that doesn't exist
+      ipam_range: 
+        startRange: "10.94.32.51"
+        endRange: "10.94.32.55"
+        state: query
+      register: dqresult
+      ignore_errors: yes
+  
+    - debug:
+        var: dqresult
+  
+    - name: IPAM create subnet - overlaps
+      ipam_subnet:
+        network: '10.43.101.0/24'
+        name: 'ansible-test-overlap'
+      register: ovresult
+      ignore_errors: yes
+      
+    - debug:
+        var: ovresult  
+        
+    - name: IPAM create subnet
+      ipam_subnet:
+        network: '10.43.104.0/24'
+        name: 'ansible-test-subnet'
+        description: 'ansible-test-subnet'
+        vlan: 104
+        customConfiguration: 'Site=DS;City=Norfolk'
+      register: subnetresult
+      
+    - debug:
+        var: subnetresult 
+
+    - name: IPAM create new range
+      ipam_range: 
+        subnet: "10.43.104.0/24"
+        startRange: "10.43.104.1"
+        endRange: "10.43.104.7"
+        description: "TEST RANGE 1" 
+      
+    - name: IPAM create new range
+      ipam_range: 
+        subnet: "10.43.104.0/24"
+        size: 8
+        description: "TEST RANGE 2"
+      register: result  
+  
+    - debug:
+        var: result
+    
+    - set_fact:
+        start: "{{ result['startRange'].split('.')[3] }}"
+        end: "{{ result['endRange'].split('.')[3] }}"
+
+    - set_fact:
+        hosts: []
+        
+    - name: IPAM create hostname list
+      set_fact:
+        hosts: "{{ hosts }} + ['{{ 'TESTHOST-%02x' | format(item) }}']"
+      loop: "{{ range(1, 3)| list }}"
+      register: create
+  
+    - debug:
+        var: create
+        
+    - name: IPAM create ip addresses
+      ipam_address: 
+        ip: "{{ item.1 }}"
+        description: "{{ item.0 }}"
+        deviceType: Host
+      loop: "{{ hosts|zip(result['ips'])|list }}"
+      #when: item.0 is not None
+      register: createall
+  
+    - debug:
+        var: createall
+              
+    - name: IPAM find free address by range
+      ipam_address:
+        startRange: "{{ result['startRange'] }}"
+        endRange: "{{ result['endRange'] }}"
+        numberOfAddresses: 2
+      register: free
+      
+    - debug:
+        var: free
+    
+    - name: IPAM create another ip address
+      ipam_address: 
+        ip: "{{ free['ips'][1] }}"
+        description: "ansible-test"
+        deviceType: Firewall
+      register: create2
+  
+    - debug:
+        var: create2
+                             
+    - name: IPAM get private address that exists
+      ipam_address: 
+        ip: "10.43.100.16"
+        state: query
+      register: exresult
+  
+    - debug:
+        var: exresult
+  
+    - name: IPAM find IP address by range
+      ipam_address:
+        startRange: "{{ exresult['ips'][0]['startRange'] }}"
+        endRange: "{{ exresult['ips'][0]['endRange'] }}"
+      register: exfree
+      
+    - debug:
+        var: exfree
+  
+    - name: IPAM find 3 IP address by range - not enough
+      ipam_address:
+        startRange: "{{ exresult['ips'][0]['startRange'] }}"
+        endRange: "{{ exresult['ips'][0]['endRange'] }}"
+        numberOfAddresses: 3
+      register: exfree3
+      ignore_errors: yes
+      
+    - debug:
+        var: exfree3
+        
+    - name: IPAM create same ip address
+      ipam_address: 
+        ip: "{{ free['ips'][0] }}"
+        description: "same-ansible-test"
+      register: samecreate
+      ignore_errors: yes
+  
+    - debug:
+        var: samecreate
+    
+    - name: IPAM get ip by name
+      ipam_address: 
+        hostname: "DSNSEXT1"
+        state: query
+      register: iresult  
+  
+    - debug:
+        var: iresult
+  
+    - name: IPAM find IP address by range
+      ipam_address:
+        startRange: "{{ iresult['ips'][0]['startRange'] }}"
+        endRange: "{{ iresult['ips'][0]['endRange'] }}"
+      register: freerange
+      
+    - debug:
+        var: freerange
+                
+    - name: IPAM get private address that doesn't exist
+      ipam_address: 
+        ip: "10.43.100.15"
+        state: query
+      register: nresult
+  
+    - debug:
+        var: nresult
+  
+#    - name: IPAM verify creation
+#      ipam_address: 
+#        ip: "{{ free['ips'][0] }}"
+#        state: query
+#      register: verify
+#  
+#    - debug:
+#        var: verify
+  
+    - name: IPAM modify ip address
+      ipam_address: 
+        ip: "{{ free['ips'][0] }}"
+        description: "ansible-test-123"
+      register: modify
+  
+    - debug:
+        var: modify
+        
+#    - name: IPAM verify modification
+#      ipam_address: 
+#        ip: "{{ free['ips'][0] }}"
+#        state: query
+#      register: verify
+#  
+#    - debug:
+#        var: verify
+        
+    - name: IPAM delete ip address
+      ipam_address: 
+        ip: "{{ free['ips'][0] }}"
+        state: absent
+      register: delete
+  
+    - debug:
+        var: delete
+                              
+    - name: IPAM query public address that exists
+      ipam_address: 
+        ip: "204.154.41.132"
+        state: query
+      register: presult  
+  
+    - debug:
+        var: presult
+         
+    - name: query public address that doesn't exist in IPAM
+      ipam_address: 
+        ip: "204.154.41.128"
+        state: query
+      register: presult
+      ignore_errors: yes
+  
+    - debug:
+        var: presult
+        
+    - name: IPAM find public address in DHS
+      ipam_address:
+        customConfiguration: "Context=DHS;Site=DS"
+        addressCategory: public
+      register: conresult
+  
+    - debug:
+        var: conresult
+  
+    - name: IPAM find 2 public address in DHS
+      ipam_address:
+        customConfiguration: "Context=DHS;Site=DS"
+        addressCategory: public
+        numberOfAddresses: 2
+      register: conresult2
+  
+    - debug:
+        var: conresult2
+              
+    - name: IPAM find private address by range
+      ipam_address:
+        startRange: "10.93.112.28"
+        endRange: "10.93.112.31"
+      register: ranresult
+      ignore_errors: yes
+      
+    - debug:
+        var: ranresult
+     
+    - name: should fail - IPAM try to find a public address in full range
+      ipam_address:
+        startRange: "204.154.42.118"
+        endRange: "204.154.42.127"
+      register: f2result
+      ignore_errors: yes
+    
+    - debug:
+        var: f2result
+        
+    - name: IPAM query subnet by networkId
+      ipam_subnet:
+        network: '10.93.112.0/24'
+        state: query
+      register: netresult
+      
+    - debug:
+        var: netresult  
+  
+    - name: IPAM find subnet by name
+      ipam_subnet:
+        name: 'services_inside'
+        state: query
+      register: namresult
+      
+    - debug:
+        var: namresult
+  
+    - name: IPAM find public subnets by context
+      ipam_subnet:
+        customConfiguration: "Context=DHS;Site=DS"
+        addressCategory: public
+        state: list
+      register: pconresult
+      
+    - debug:
+        var: pconresult  
+  
+    - name: IPAM private subnets by context
+      ipam_subnet:
+        customConfiguration: "Context=DHS;Site=DS"
+        addressCategory: private
+        state: list
+      register: prconresult
+      
+    - debug:
+        var: prconresult
+              
+    - name: IPAM find all subnets per context
+      ipam_subnet:
+        customConfiguration: "Context=DHS;Site=DS"
+        state: list
+      register: allconresult
+      
+    - debug:
+        var: allconresult
+        
+    - name: Should fail - IPAM find subnet by networkId
+      ipam_subnet:
+        network: '10.10.112.0/24'
+        state: query
+      register: fresult1
+      ignore_errors: yes
+      
+    - debug:
+        var: fresult  
+  
+    - name: should fail - IPAM find subnet by name
+      ipam_subnet:
+        name: 'test_inside'
+        state: query
+      register: fresult2
+      ignore_errors: yes
+      
+    - debug:
+        var: fresult2
+     
+    - name: should fail - IPAM test create same range
+      ipam_range: 
+        subnet: "10.43.104.0/24"
+        startRange: "{{ result['startRange'] }}"
+        endRange: "{{ result['endRange'] }}"
+        name: "TEST RANGE"
+      register: sameresult
+      ignore_errors: yes
+      
+    - debug:
+        var: sameresult
+        
+    - name: should fail - IPAM create same subnet
+      ipam_subnet:
+        network: '10.43.104.0/24'
+        name: 'ansible-test-subnet'
+        description: 'ansible-test-subnet'
+      register: ssubresult
+      ignore_errors: yes
+      
+    - debug:
+        var: ssubresult
+        
+    - name: IPAM modify subnet
+      ipam_subnet:
+        network: '10.43.104.0/24'
+        name: 'mod-ansible-test-subnet'
+        description: 'mod-ansible-test-subnet'
+      register: modsubnet
+      
+    - debug:
+        var: modsubnet
+  
+    - name: IPAM delete dynamic range
+      ipam_range: 
+        startRange: "{{ result['startRange'] }}"
+        endRange: "{{ result['endRange'] }}"
+        state: absent
+        removeIP: true
+      register: delete  
+  
+    - debug:
+        var: delete
+ 
+    - name: IPAM delete first range
+      ipam_range: 
+        startRange: "10.43.104.1"
+        endRange: "10.43.104.7"
+        state: absent
+        removeIP: true
+                 
+    - name: IPAM remove subnet
+      ipam_subnet:
+        network: '10.43.104.0/24'
+        state: absent
+      register: delsubnet
+      
+    - debug:
+        var: delsubnet
+  
+    - name: IPAM remove subnet
+      ipam_subnet:
+        network: '10.43.101.0/24'
+        state: absent
+             
+    rescue:
+    - name: RESCUE delete ip address
+      ipam_address: 
+        ip: "{{ free['ips'][0] }}"
+        state: absent
+      ignore_errors: yes
+    
+    - name: RESCUE delete created range
+      ipam_range: 
+        startRange: "{{ result['startRange'] }}"
+        endRange: "{{ result['endRange'] }}"
+        state: absent
+        removeIP: true
+      ignore_errors: yes
+
+    - name: IPAM delete first range
+      ipam_range: 
+        startRange: "10.43.104.1"
+        endRange: "10.43.104.7"
+        state: absent
+        removeIP: true
+      ignore_errors: yes
+          
+    - name: RESCUE remove subnet
+      ipam_subnet:
+        network: '10.43.104.0/24'
+        state: absent
+      ignore_errors: yes
+    
+    - name: RESCUE remove subnet
+      ipam_subnet:
+        network: '10.43.101.0/24'
+        state: absent
+      ignore_errors: yes
+        

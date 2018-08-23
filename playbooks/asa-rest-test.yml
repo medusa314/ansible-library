@@ -1,0 +1,56 @@
+---
+- name: playbook for new asa REST modules
+  hosts: asa
+  connection: local
+  gather_facts: false
+  
+  tasks:
+  - name: test asa REST
+    include_role:
+      name: asa
+      tasks_from: asa_rest
+#      when: context is not defined
+
+- name: playbook for new asa REST modules
+  hosts: asa
+  connection: local
+  gather_facts: false
+  
+  vars:
+    CONTEXTS:
+      - "admin"
+    
+  tasks:
+  - name: Get provider
+    include_tasks: tasks/get_provider_awx.yml
+    
+  - include_tasks: roles/asa/tasks/asa_provider.yml 
+  
+  - name: "GET ASA arp WHEN THERE IS A CONTEXT"
+    asa_rest_arp:
+      provider: "{{ asa }}"
+      validate_certs: False
+      context: "{{ item }}"
+      interface: "services_dmz"
+    loop: "{{ CONTEXTS }}"
+    register: get_arp
+
+  - name: "PRINT RESULT"
+    debug:
+      var=get_arp
+          
+  - name: "GET ASA arp for network"
+    asa_rest_arp:
+      provider: "{{ asa }}"
+      validate_certs: False
+      context: "{{ item }}"
+      network: 10.93.112.0/24
+    loop: "{{ CONTEXTS }}"
+    register: get_arp
+
+  - name: "PRINT RESULT"
+    debug:
+      var=get_arp
+        
+      
+  

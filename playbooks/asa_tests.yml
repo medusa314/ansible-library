@@ -1,0 +1,36 @@
+---
+- hosts: asa
+  connection: local
+  gather_facts: false
+
+  tasks:
+  - name: Get provider
+    include_tasks: tasks/get_provider_awx.yml
+    
+  - include_tasks: roles/asa/tasks/asa_provider.yml 
+  - name: Ping
+    register: ping_result
+    asa_ping:
+      dest: "{{ DESTINATION }}"
+      count: 2
+    ignore_errors: yes
+  
+  - name: Print ping result
+    debug:
+      msg: "{{ ping_result }}"
+  
+  - name: get arp
+    register: arp_result
+    asa_get_arp:
+      ip: "{{ item['destination'] }}"
+    loop: "{{ ping_result['results']|flatten(levels=1) }}"
+      
+  #- name: Print result
+  #  debug:
+  #    var: arp_result['results']
+      
+  - name: Print result
+    debug:
+      msg: "{{ item['results'].values() }}"
+    loop: "{{ arp_result['results'] }}"
+

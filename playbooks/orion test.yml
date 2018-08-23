@@ -1,0 +1,53 @@
+---
+- hosts: cacc
+  connection: local
+  gather_facts: false
+  #strategy: debug
+  serial: 1
+
+  tasks:
+  - block:
+    - name: Supress Alerts
+      orion_suppress_alerts:
+        host: "ORION.de.com"
+        username: "{{ ansible_user }}"
+        password: "{{ ansible_password }}"
+        ip: "{{ ansible_host }}"
+        state: present
+      no_log: True
+
+    - set_fact:
+        monitored: True
+
+    - pause:
+        seconds: 30
+                        
+    rescue:
+    - set_fact:      
+        monitored: False
+
+  - block:        
+    - name: Resume Alerts
+      when: monitored
+      orion_suppress_alerts:
+        host: "ORION.de.com"
+        username: "{{ ansible_user }}"
+        password: "{{ ansible_password }}"
+        ip: "{{ ansible_host }}"
+        state: present
+      no_log: True
+
+    - set_fact:
+        resumed: True
+
+    - pause:
+        seconds: 30
+                        
+    rescue:
+    - set_fact:      
+        resumed: False
+        
+  - block:        
+    - debug:
+        msg: "monitored is {{ monitored }} resumed is {{ resumed }}"
+  
