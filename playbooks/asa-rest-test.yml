@@ -31,7 +31,7 @@
       provider: "{{ asa }}"
       validate_certs: False
       context: "{{ item }}"
-      interface: "services_dmz"
+      interface: "dmz"
     loop: "{{ CONTEXTS }}"
     register: get_arp
 
@@ -44,7 +44,7 @@
       provider: "{{ asa }}"
       validate_certs: False
       context: "{{ item }}"
-      network: 10.93.112.0/24
+      network: 10.9.2.0/24
     loop: "{{ CONTEXTS }}"
     register: get_arp
 
