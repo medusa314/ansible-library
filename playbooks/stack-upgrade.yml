@@ -1,0 +1,309 @@
+---
+- hosts: cacc
+  connection: local
+  gather_facts: false
+  #strategy: debug
+  serial: 1
+  force_handlers: true
+        
+  vars_prompt:
+    - name:  USERNAME
+      prompt: "Enter username"
+      private: no
+    - name:  DEVICE_PASSWORD
+      prompt:  "Enter password"
+      private: yes 
+
+  vars:
+    mailsubject: "{{ inventory_hostname }} stack-upgrade.yml"
+    
+  tasks:
+  - block:
+    - set_fact:      
+        email_results: []
+        
+    - name: Get provider
+      include_tasks: tasks/get_provider.yml
+      tags:
+        - always
+    - include_tasks: roles/ios/tasks/ios_provider.yml
+      tags:
+        - always
+   
+    - name: get facts
+      ios_facts:
+        provider: "{{ ios }}"
+        gather_subset:
+          - ansible_net_version
+      tags:
+        - preupgrade
+        
+    - name: Verify file transfer settings
+      ios_config:
+        provider: "{{ ios }}"
+        commands: 
+          - "ip scp server enable"
+          - "service tcp-keepalives-in"
+          - "service tcp-keepalives-out"
+      register: settings
+      notify: 
+        - send_mail
+      tags:
+        - preupgrade
+
+    - include_tasks: roles/ios/tasks/ios_save_config.yml
+      tags:
+        - preupgrade
+      
+    - name: "Update configuration results for SCP"
+      when: "(settings.changed == true)"
+      set_fact: 
+        configured: true
+        email_results: "{{ email_results }} + ['Changes applied: '] + {{ settings['updates'] }}"
+      tags:
+        - preupgrade
+  
+    - include_tasks: roles/ios/tasks/ios_provider.yml
+      when: "(settings.changed == true)"
+      tags:
+        - preupgrade
+  
+    - name: Verification commands
+      ios_command:
+        provider: "{{ ios }}"
+        commands: 
+          - "show switch | i Ready"
+          - "show cdp neighbors | i IP Phone"
+          - "show cdp neighbors | i AIR"
+          - "show pagp neighbor | i Te"
+          - "show interface trunk"
+          - "show interface status | i trunk"
+          - "show stack-power"
+          - "show switch stack-ports"
+          - "show spanning-tree root"
+      register: pre
+      notify: 
+        - send_mail
+      changed_when: True
+      tags:
+        - preupgrade
+  
+  #  - debug:
+  #      var: pre
+    
+    - name: Email results
+      set_fact:
+        email_results: "{{ email_results }} + [ 'Pre-upgrade version: {{ ansible_net_version }}' ]"
+      tags:
+        - preupgrade
+  
+    - set_fact:      
+        email_results: "{{ email_results }} + [ 'show switch' ] + {{ pre.stdout_lines[0] }}"
+      tags:
+        - preupgrade
+                  
+    - set_fact:      
+        email_results: "{{ email_results }} + [ '{{ pre.stdout_lines[1]|length }} Phones, {{ pre.stdout_lines[2]|length }} APs' ]"
+      tags:
+        - preupgrade
+  
+    - set_fact:      
+        email_results: "{{ email_results }} + ['show PAgP neighbors'] + {{ pre.stdout_lines[3] }}"
+      tags:
+        - preupgrade
+        
+    - set_fact:      
+        email_results: "{{ email_results }} + ['show interface trunk'] + {{ pre.stdout_lines[4] }}"
+      tags:
+        - preupgrade
+        
+    - set_fact:      
+        email_results: "{{ email_results }} + ['show interface status'] + {{ pre.stdout_lines[5] }}"
+      tags:
+        - preupgrade
+        
+    - set_fact:      
+        email_results: "{{ email_results }} + ['show stack-power'] + {{ pre.stdout_lines[6] }}"
+      tags:
+        - preupgrade
+     
+    - set_fact:      
+        email_results: "{{ email_results }} + ['show switch stack-ports'] + {{ pre.stdout_lines[7] }}"
+      tags:
+        - preupgrade
+        
+    - set_fact:      
+        email_results: "{{ email_results }} + ['show spanning-tree root'] + {{ pre.stdout_lines[8] }}"
+      tags:
+        - preupgrade
+  
+  - block:                     
+    - name: Clean Up Flash
+      ios_command:
+        provider: "{{ ios }}"
+        commands: "software clean\nyes"
+      tags:
+        - preupgrade
+    
+    rescue:
+      - set_fact:
+          software_clean: true      
+
+  - block:                    
+    - name: Copy New Image to Stack
+      ios_command:
+        provider: "{{ ios }}"
+        commands: "copy scp: flash:\n10.94.254.138\n\n/ftp/IOS/{{ file }}\n\n{{ ios['password'] }}"
+        timeout: 3600
+      tags:
+        - preupgrade
+        
+    - name: Confirm file copied
+      register: confirm_result
+      ios_command:
+        provider: "{{ ios }}"
+        commands: "dir flash:*.bin"
+      failed_when: "'No such file' in confirm_result['stdout_lines'][0][2]"
+      tags:
+        - preupgrade
+  #   Will stop the playbook for the host if file is not copied
+  
+    - name: Verify file
+      ios_command:
+        provider: "{{ ios }}"
+        commands: "verify flash:{{ file }}"
+      register: verify_file
+      tags:
+        - preupgrade
+        
+    - set_fact:      
+        email_results: "{{ email_results }} + ['=====================================']"
+      with_items: "{{ verify_file['stdout_lines'][0] }}"
+      failed_when: "'Digital signature successfully verified' not in item"
+      tags:
+        - preupgrade    
+  #   Will stop the playbook for the host if the packages do not pass verification
+
+  - block:
+    - name: Suppress Alerts for upgrade
+      include_tasks: roles/orion/tasks/suppress_alert.yml
+      tags:
+        - upgrade
+                     
+    - name: install software
+      ios_command:
+        provider: "{{ ios }}"
+        commands: "software install file flash:{{ file }} switch 1-{{ stack_size }}\nyes"
+        timeout: 600
+      tags:
+        - upgrade
+                    
+    - name: After ten minutes wait for ssh
+      local_action: 
+        module: wait_for
+        host: "{{ ansible_host }}"
+        port: 22 
+        delay: 600
+        timeout: 1200
+        state: started
+      tags:
+        - upgrade
+          
+    - name: Verification commands
+      ios_command:
+        provider: "{{ ios }}"
+        commands: 
+          - "show switch | i Ready"
+          - "show cdp neighbors | i IP Phone"
+          - "show cdp neighbors | i AIR"
+          - "show pagp neighbor | i Te"
+          - "show interface trunk"
+          - "show interface status | i trunk"
+          - "show stack-power"
+          - "show switch stack-ports"
+          - "show spanning-tree root"
+      register: post
+      notify: 
+        - send_mail
+      changed_when: True
+      tags:
+        - upgrade
+  
+  #  - debug:
+  #      var: post
+    - name: Clean Up Flash
+      ios_command:
+        provider: "{{ ios }}"
+        commands: "software clean\nyes"
+      tags:
+        - upgrade
+              
+    - name: get facts
+      ios_facts:
+        provider: "{{ ios }}"
+        gather_subset:
+          - "!hardware"
+      tags:
+        - upgrade
+    
+    - name: Email results
+      set_fact:
+        email_results: "{{ email_results }} + [ 'Post-upgrade version: {{ ansible_net_version }}' ]"
+      tags:
+        - upgrade
+  
+    - set_fact:      
+        email_results: "{{ email_results }} + [ 'show switch' ] + {{ post.stdout_lines[0] }}"
+      tags:
+        - upgrade
+                  
+    - set_fact:      
+        email_results: "{{ email_results }} + [ '{{ post.stdout_lines[1]|length }} Phones, {{ post.stdout_lines[2]|length }} APs' ]"
+      tags:
+        - upgrade
+  
+    - set_fact:      
+        email_results: "{{ email_results }} + ['show PAgP neighbors'] + {{ post.stdout_lines[3] }}"
+      tags:
+        - upgrade
+        
+    - set_fact:      
+        email_results: "{{ email_results }} + ['show interface trunk'] + {{ post.stdout_lines[4] }}"
+      tags:
+        - upgrade
+        
+    - set_fact:      
+        email_results: "{{ email_results }} + ['show interface status'] + {{ post.stdout_lines[5] }}"
+      tags:
+        - upgrade
+        
+    - set_fact:      
+        email_results: "{{ email_results }} + ['show stack-power'] + {{ post.stdout_lines[6] }}"
+      tags:
+        - upgrade
+     
+    - set_fact:      
+        email_results: "{{ email_results }} + ['show switch stack-ports'] + {{ post.stdout_lines[7] }}"
+      tags:
+        - upgrade
+        
+    - set_fact:      
+        email_results: "{{ email_results }} + ['show spanning-tree root'] + {{ post.stdout_lines[8] }}"
+      tags:
+        - upgrade
+        
+    - name: Resume Alerts after upgrade
+      when: monitored
+      include_tasks: roles/orion/tasks/resume_alert.yml
+      tags:
+        - upgrade
+        
+    rescue:
+    - name: Resume Alerts after failed upgrade
+      when: monitored
+      include_tasks: roles/orion/tasks/resume_alert.yml
+      tags:
+        - upgrade
+        
+  handlers:
+  - import_tasks: handlers/send_mail.yml
